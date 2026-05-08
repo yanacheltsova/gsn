@@ -4,8 +4,10 @@ import re
 import sys
 import os
 
+from typing import Dict, List, Tuple, Any
 
-def parse_args():
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--AlphaMissense", required=True)
@@ -14,18 +16,18 @@ def parse_args():
     return parser.parse_args()
 
 
-def read_alphamissense(tsv_path):
+def read_alphamissense(tsv_path: str) -> pd.DataFrame:
     try:
         return pd.read_csv(tsv_path, sep="\t")
     except Exception as e:
         sys.exit(f"Error reading TSV: {e}")
 
 
-def get_gene_name(df):
+def get_gene_name(df: pd.DataFrame) -> str:
     if "Gene name" not in df.columns:
         sys.exit("Column 'Gene name' not found")
 
-    gene = str(df["Gene name"].iloc[0]).strip()
+    gene: str = str(df["Gene name"].iloc[0]).strip()
 
     if not gene or gene == "nan":
         gene = "UnknownGene"
@@ -35,22 +37,25 @@ def get_gene_name(df):
     return gene
 
 
-def generate_output_filename(gene):
-    base = f"{gene}_result.xlsx"
+def generate_output_filename(gene: str) -> str:
+    base: str = f"{gene}_result.xlsx"
 
     if not os.path.exists(base):
         return base
 
-    i = 1
+    i: int = 1
+
     while True:
-        candidate = f"{gene}_result_{i}.xlsx"
+        candidate: str = f"{gene}_result_{i}.xlsx"
+
         if not os.path.exists(candidate):
             return candidate
+
         i += 1
 
 
-def parse_mutation(mutation):
-    pattern = r"^([A-Z])([0-9]+)([A-Z])$"
+def parse_mutation(mutation: str) -> Tuple[str, int, str]:
+    pattern: str = r"^([A-Z])([0-9]+)([A-Z])$"
     match = re.match(pattern, mutation)
 
     if not match:
@@ -61,14 +66,14 @@ def parse_mutation(mutation):
     return ref, int(pos), alt
 
 
-def read_mutations(txt_path):
-    mutations = []
+def read_mutations(txt_path: str) -> List[Tuple[str, str, int, str]]:
+    mutations: List[Tuple[str, str, int, str]] = []
 
     try:
         with open(txt_path) as f:
-            content = f.read()
+            content: str = f.read()
 
-        raw_mutations = content.split(";")
+        raw_mutations: List[str] = content.split(";")
 
         for mut in raw_mutations:
             mut = mut.strip()
@@ -79,6 +84,7 @@ def read_mutations(txt_path):
             try:
                 parsed = parse_mutation(mut)
                 mutations.append((mut, *parsed))
+
             except ValueError as e:
                 print(f"Warning: {e}")
 
@@ -88,7 +94,7 @@ def read_mutations(txt_path):
         sys.exit(f"Error reading mutations: {e}")
 
 
-def extract_alt_aas(cell):
+def extract_alt_aas(cell: Any) -> List[str]:
     if pd.isna(cell):
         return []
 
@@ -103,11 +109,17 @@ def extract_alt_aas(cell):
     return [x.strip() for x in cell.split(",") if x.strip()]
 
 
-def build_lookup(df):
-    lookup = {}
+def build_lookup(
+    df: pd.DataFrame
+) -> Dict[Tuple[str, int], Dict[str, List[str]]]:
+
+    lookup: Dict[Tuple[str, int], Dict[str, List[str]]] = {}
 
     for _, row in df.iterrows():
-        key = (row["a.a."], int(row["position"]))
+        key: Tuple[str, int] = (
+            row["a.a."],
+            int(row["position"])
+        )
 
         lookup[key] = {
             "benign": extract_alt_aas(row["all benign variants"]),
@@ -118,25 +130,37 @@ def build_lookup(df):
     return lookup
 
 
-def find_category(row_data, alt):
+def find_category(
+    row_data: Dict[str, List[str]],
+    alt: str
+) -> str:
+
     if alt in row_data["pathogenic"]:
         return "pathogenic"
+
     elif alt in row_data["benign"]:
         return "benign"
+
     elif alt in row_data["ambiguous"]:
         return "ambiguous"
+
     else:
         return "NOT_FOUND"
 
 
-def match_mutations(lookup, mutations):
-    results = []
+def match_mutations(
+    lookup: Dict[Tuple[str, int], Dict[str, List[str]]],
+    mutations: List[Tuple[str, str, int, str]]
+) -> pd.DataFrame:
+
+    results: List[Dict[str, str]] = []
 
     for mut_str, ref, pos, alt in mutations:
-        key = (ref, pos)
+        key: Tuple[str, int] = (ref, pos)
 
         if key not in lookup:
-            category = "POSITION_NOT_FOUND"
+            category: str = "POSITION_NOT_FOUND"
+
         else:
             row_data = lookup[key]
             category = find_category(row_data, alt)
@@ -149,21 +173,33 @@ def match_mutations(lookup, mutations):
     return pd.DataFrame(results)
 
 
-def main():
-    args = parse_args()
-    df = read_alphamissense(args.AlphaMissense)
-    mutations = read_mutations(args.mutations)
+def main() -> None:
+    args: argparse.Namespace = parse_args()
 
-    gene = get_gene_name(df)
-    output_file = generate_output_filename(gene)
+    df: pd.DataFrame = read_alphamissense(args.AlphaMissense)
 
-    lookup = build_lookup(df)
+    mutations: List[Tuple[str, str, int, str]] = read_mutations(
+        args.mutations
+    )
 
-    result_df = match_mutations(lookup, mutations)
+    gene: str = get_gene_name(df)
+
+    output_file: str = generate_output_filename(gene)
+
+    lookup: Dict[
+        Tuple[str, int],
+        Dict[str, List[str]]
+    ] = build_lookup(df)
+
+    result_df: pd.DataFrame = match_mutations(
+        lookup,
+        mutations
+    )
 
     try:
         result_df.to_excel(output_file, index=False)
         print(f"Saved to {output_file}")
+
     except Exception as e:
         sys.exit(f"Error writing Excel: {e}")
 
